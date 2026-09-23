@@ -1,7 +1,8 @@
 # camera-geometry-service
 
-针孔投影 + Brown–Conrady 畸变 + 双视图三角化的后端服务。标定/重建流水线把一批点作为
-一个**作业**提交上来，拿回投影结果或三角化结果。纯 HTTP/JSON，无前端。
+针孔投影 + Brown–Conrady 畸变 + 双视图三角化 + **相机标定（从观测反解内参/畸变/位姿）** 的后端
+服务。标定/重建流水线把一批点作为一个**作业**提交上来，拿回投影结果、三角化结果或标定结果。
+纯 HTTP/JSON，无前端。
 
 ## 投影模型（钉死的约定）
 
@@ -34,14 +35,49 @@
 作业级报告有效匹配上的**最大/平均重投影误差**。三角化结果落在某台相机后方的
 匹配对标记 `valid=false`（这是计算结果而非输入错误），其余匹配继续。
 
+## 标定方法：线性初值 + LM 迭代重投影细化（两段式，固定）
+
+标定作业把同一块已知几何的控制点（世界系三维位置）在若干张照片里被点出的像素提交上来，
+反解出**一台**相机的内参（fx、fy、cx、cy）、Brown–Conrady 系数（k1、k2、p1、p2）以及
+**每张观测各自的世界→相机位姿**。绝不允许退化成一次线性求解就交差：
+
+1. **粗初值（仅线性闭式解）**：
+   - 非平面三维控制点：每视图解 DLT 相机矩阵（输入坐标做 Hartley 归一化），RQ 分解
+     （Gram–Schmidt）劈出 K，多视图平均；位姿由 K 固定的归一化 DLT + cheirality 定符号。
+   - 平面标定板：张正友线性法（零斜切，每视图单应贡献两条关于 ω=K⁻ᵀK⁻¹ 的方程），
+     位姿由单应分解 + 平面深度 cheirality 二选一。
+   - 畸变初值恒为零（线性阶段无法估计非线性项）。
+2. **迭代细化（Levenberg–Marquardt，唯一的参数来源）**：内参、四个畸变系数、全部位姿
+   （位姿用 Rodrigues 3 向量参数化，天然正交）打包进**同一个**参数向量，雅可比取中心
+   数值差分，阻尼信赖域自适应伸缩，直接最小化**所有观测、所有点的像素重投影残差平方和**。
+   残差走的就是本服务那条「归一化平面 r² → 径向 (1+k1r²+k2r⁴) → p1/p2 切向 → 内参映射像素」
+   的投影管线（`BrownConradyDistortion` + 内参），标定结果与投影内核严丝合缝。
+
+**红线**：不平均像素、不用解析公式凑内参；解出来的参数只来自「让重投影误差最小」这一
+迭代过程的收敛结果。最终最大/平均重投影误差由 `PinholeProjector` 把每个世界点重投影回去
+逐点算出，既是质量指标也是验收卡口。
+
+**停机条件（回包如实标注，调用方永远看得出这次标定到底怎样）**：残差 RMS ≤ 阈值
+（`RESIDUAL_THRESHOLD_REACHED`，此时 `converged=true`）；相邻两轮改善微乎其微
+（`IMPROVEMENT_TOO_SMALL`）；参数步长微乎其微（`STEP_TOO_SMALL`）；到迭代上限
+（`MAX_ITERATIONS_REACHED`）；信赖域缩到底仍无法下降（`DIVERGED`）——后四种
+`converged=false`，但仍返回参数、最终残差、停机原因、跑了多少轮，不假装成功。
+
+**观测充分性**（开算前以带类型错误拒绝，绝不返回「看着像样其实没意义」的数）：
+平面标定板至少 **2 张**不同姿态的视图（单视图无法把焦距和板深/尺度分开，错误的内参也能
+零误差重投影）；非平面三维控制点单视图即可辨识；每视图平面 ≥4 点 / 三维 ≥6 点；
+且 `2×总观测点数 ≥ 未知量(4 内参 [+4 畸变] + 6×视图数) + 余量`。
+
 ## 作业与校验策略
 
 - **投影作业**：一组内参+畸变系数 + 一批相机系三维点 → 每点像素坐标与在像面内标记
   + 像面外点数。
 - **三角化作业**：两台相机（内参+畸变+外参）+ 一组匹配像点对 → 每对三维点与重投影
   误差 + 作业级最大/平均误差。
-- **非法点策略（全局一致）**：fail-fast，整作业拒绝。所有点在第一次投影/三角化之前
-  全部校验完毕，任一非法点（如 Z≤0）以带类型的 422 拒绝整个作业，不产生部分结果。
+- **标定作业**：一组观测（每张 = 同一块控制点的世界三维点 + 对应像素）+ 像面宽高 →
+  反解内参、畸变（可选）、每视图位姿 + 收敛诊断 + 作业级最大/平均重投影误差。
+- **非法点策略（全局一致）**：fail-fast，整作业拒绝。所有点在第一次投影/三角化/求解
+  之前全部校验完毕，任一非法点以带类型的 422 拒绝整个作业，不产生部分结果。
 
 ## API
 
@@ -50,12 +86,48 @@
 | POST | `/api/project` | 单点投影 `{intrinsics, distortion?, point}` → `{u, v, inBounds}` |
 | POST | `/api/jobs/projection` | 投影作业 `{intrinsics, distortion?, points[]}` → `{results[], totalPoints, outOfBoundsCount}` |
 | POST | `/api/jobs/triangulation` | 三角化作业 `{camera1, camera2, matches[]}` → `{pairs[], pairCount, validPairCount, maxReprojectionError, meanReprojectionError}` |
+| POST | `/api/jobs/calibration` | 标定作业 `{width, height, estimateDistortion?, observations[]}` → 内参+畸变+每视图位姿+收敛诊断+最大/平均误差 |
 | GET | `/api/presets` | 只读回显已注册内参预设 + 立方体标定算例（可直接 POST 回去） |
-| GET | `/api/status` | 运行状态：版本、启动时间、已完成作业计数 |
+| GET | `/api/status` | 运行状态：版本、启动时间、已完成作业计数（投影/三角化/**标定**） |
 
 - `distortion` 整个对象可省略（等价于零畸变）；一旦给出，`k1/k2/p1/p2` 缺一不可。
 - 外参格式：`{"rotation": [[..],[..],[..]], "translation": [x,y,z]}`，世界→相机：`X_cam = R·X_world + t`。
 - 匹配点对格式：`{"view1": {"x","y"}, "view2": {"x","y"}}`。
+
+### 标定作业请求/回包
+
+```json
+{
+  "width": 1280, "height": 720, "estimateDistortion": true,
+  "observations": [
+    {"worldPoints": [{"x","y","z"}, ...],
+     "pixels":      [{"x","y"}, ...]}
+  ]
+}
+```
+
+- 每张观测的 `worldPoints` 与 `pixels` 必须等长且按下标对齐（第 i 个三维点在第 i 个像素被看到）。
+  世界坐标无 Z>0 限制（那是相机系规则，标定输入是世界系），但必须全部有限。
+- `estimateDistortion` 省略或为 true → 估计 k1/k2/p1/p2；为 false → 固定为零（纯针孔标定）。
+
+回包（`POST /api/jobs/calibration`）：
+
+```json
+{
+  "calibrationMethod": "BUNDLE_REPROJECTION_LM",
+  "intrinsics": {"fx","fy","cx","cy","width","height"},
+  "distortion": {"k1","k2","p1","p2"},
+  "poses": [{"observation": 0, "extrinsics": {"rotation","translation"},
+             "maxReprojectionError","meanReprojectionError"}, ...],
+  "convergence": {"converged": true, "stopReason": "RESIDUAL_THRESHOLD_REACHED",
+                  "iterations": 9, "initialRmsError": 0.21,
+                  "finalRmsError": 7.3e-10, "rmsThresholdPixels": 1e-9},
+  "observationCount": 5, "totalPoints": 100,
+  "maxReprojectionError": 2.3e-9, "meanReprojectionError": 9.2e-10
+}
+```
+
+位姿回包约定与三角化一致：`{"rotation","translation"}`，世界→相机 `X_cam = R·X_world + t`。
 
 ### 结构化错误
 
@@ -75,7 +147,10 @@
 | `MISSING_EXTRINSICS` | 三角化某台相机缺外参 |
 | `INVALID_EXTRINSICS` | 旋转非 3×3 / 平移非 3 维 / 含非有限值 |
 | `EMPTY_MATCH_SET` | 匹配点对数量为零 |
-| `MISSING_FIELD` / `INVALID_VALUE` | 其它缺项 / 非有限数值 |
+| `EMPTY_OBSERVATION_SET` | 标定作业一张观测都没有 |
+| `OBSERVATION_SIZE_MISMATCH` | 某张观测的三维点数与像素点数对不上 |
+| `INSUFFICIENT_CONSTRAINTS` | 观测/控制点太少或退化（平面仅 1 视图、每视图点数不足、方程数少于未知量） |
+| `MISSING_FIELD` / `INVALID_VALUE` | 其它缺项 / 非有限数值（含非有限世界坐标或像素） |
 | `MALFORMED_REQUEST` | 请求体不是合法 JSON（400） |
 
 ## 预置算例
@@ -116,15 +191,27 @@ mvn spring-boot:run
 | Z≤0 / 焦距非正 / 外参缺失 / 零匹配分别被拒 | `ProjectionApiTest`、`TriangulationApiTest` 各 `*Rejected*` 用例 |
 | 单点与批量同点结果一致 | `ProjectionApiTest.singlePointAndBatchJobShareTheSameProjectionResult` |
 | 多作业并发结果隔离 | `ConcurrencyIsolationTest.concurrentJobsNeverMixTheirResults` |
+| 真值回环：投影→观测→标定，解回原内参/位姿且重投影近零（平面/三维、零畸变） | `CameraCalibratorTest.planarBoardWithZeroDistortionRecoversGroundTruthParameters`、`...nonPlanarVolumeRecoversGroundTruthParameters`、`CalibrationApiTest.nonZeroDistortionRoundTripRecoversParametersAndNearZeroErrors` |
+| 非零 k1/k2/p1/p2 被认出而非解成零还硬说收敛 | `CameraCalibratorTest.planarBoardWithNonZeroDistortionRecoversTheCoefficients`、`...nonPlanarVolumeWithNonZeroDistortionRecoversTheCoefficients` |
+| 观测不足（零观测/点太少/单平面视图/方程欠定）被结构化拒绝 | `CameraCalibratorTest.zeroObservationsAreRejected` 等、`CalibrationApiTest.emptyObservationSetIsRejected`、`...singlePlanarViewIsRejectedAsUnderConstrained`、`...tooFewEquationsForTheUnknownCountAreRejected` |
+| 收敛状态如实上报（达标才 converged；不自洽数据不谎称达标） | `CameraCalibratorTest.convergenceReportShowsThresholdStopAndNonZeroIterationCount`、`...inconsistentObservationsDoNotClaimThresholdConvergence` |
+| 多个标定作业并发，参数与误差报告互不串味 | `CalibrationConcurrencyTest.concurrentCalibrationJobsNeverMixTheirParametersOrErrorReports` |
 
 ## 代码结构
 
 ```
 com.acme.camera
 ├── core          纯几何内核：针孔投影、Brown–Conrady 畸变、DLT 三角化、Jacobi 特征分解
+├── calibration   标定内核（与投影/三角化/校验各自独立成包）：
+│                 ├─ CameraCalibrator         两段式编排（线性初值 → LM 迭代 → 经投影内核复核误差）
+│                 ├─ CalibrationInitializer   线性粗初值（三维 DLT+RQ / 平面 Zhang、Hartley 归一化）
+│                 ├─ LevenbergMarquardt       通用 LM 迭代优化（独立放置，雅可比取中心数值差分）
+│                 ├─ CalibrationResidualModel 参数打包/解包 + 重投影残差（复用现有投影管线）
+│                 ├─ RotationMath / RqDecomposition / DenseSolver   Rodrigues、RQ 分解、Cholesky/Jacobi
+│                 └─ CalibrationConstraintChecker                  观测充分性（不足即结构化拒绝）
 ├── validation    输入校验 + 带类型的结构化错误
 ├── job           作业编排（无状态服务，天然并发隔离）+ 作业计数
-├── api           HTTP 路由（投影/三角化/预设/状态四个 Controller）+ 全局异常映射 + DTO
+├── api           HTTP 路由（投影/三角化/标定/预设/状态五个 Controller）+ 全局异常映射 + DTO
 ├── preset        内参预设注册表 + 已知立方体标定算例
 └── config        内核 Bean 装配
 ```

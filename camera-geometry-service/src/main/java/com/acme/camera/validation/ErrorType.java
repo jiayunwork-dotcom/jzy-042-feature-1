@@ -24,6 +24,12 @@ public enum ErrorType {
     INVALID_EXTRINSICS,
     /** A triangulation job carries zero matched pairs. */
     EMPTY_MATCH_SET,
+    /** A calibration job carries zero observations. */
+    EMPTY_OBSERVATION_SET,
+    /** One calibration observation has mismatched world-point / pixel counts. */
+    OBSERVATION_SIZE_MISMATCH,
+    /** Calibration observations cannot determine the unknowns (too few/degenerate). */
+    INSUFFICIENT_CONSTRAINTS,
     /** Unanticipated server-side failure. */
     INTERNAL_ERROR
 }

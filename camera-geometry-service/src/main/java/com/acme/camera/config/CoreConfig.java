@@ -1,5 +1,6 @@
 package com.acme.camera.config;
 
+import com.acme.camera.calibration.CameraCalibrator;
 import com.acme.camera.core.DltTriangulator;
 import com.acme.camera.core.PinholeProjector;
 import org.springframework.context.annotation.Bean;
@@ -17,5 +18,10 @@ public class CoreConfig {
     @Bean
     public DltTriangulator dltTriangulator() {
         return new DltTriangulator();
+    }
+
+    @Bean
+    public CameraCalibrator cameraCalibrator(PinholeProjector projector) {
+        return new CameraCalibrator(projector);
     }
 }

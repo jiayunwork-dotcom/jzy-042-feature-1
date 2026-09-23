@@ -1,0 +1,9 @@
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/api/CalibrationApiTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/api/CalibrationConcurrencyTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/api/ConcurrencyIsolationTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/api/ProjectionApiTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/api/TriangulationApiTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/calibration/CalibrationFixtures.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/calibration/CameraCalibratorTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/core/DltTriangulatorTest.java
+/workspace/camera-geometry-service/src/test/java/com/acme/camera/core/PinholeProjectorTest.java

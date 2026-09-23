@@ -147,6 +147,37 @@ public final class InputValidator {
         return new Point2D(dto.x(), dto.y());
     }
 
+    /**
+     * A world-frame control point for calibration: present and finite. Unlike
+     * {@link #requireProjectablePoint} there is no Z&gt;0 requirement — these coordinates live
+     * in the world frame, not a camera frame.
+     */
+    public static Point3D requireWorldPoint(Point3DDto dto, String path) {
+        if (dto == null) {
+            throw new GeometryValidationException(ErrorType.MISSING_FIELD,
+                    "Missing world point at '" + path + "'", Map.of("field", path));
+        }
+        requirePresent(dto.x(), path + ".x", ErrorType.MISSING_FIELD);
+        requirePresent(dto.y(), path + ".y", ErrorType.MISSING_FIELD);
+        requirePresent(dto.z(), path + ".z", ErrorType.MISSING_FIELD);
+        if (!Double.isFinite(dto.x()) || !Double.isFinite(dto.y()) || !Double.isFinite(dto.z())) {
+            throw new GeometryValidationException(ErrorType.INVALID_VALUE,
+                    "World coordinates must be finite at '" + path + "'", Map.of("field", path));
+        }
+        return new Point3D(dto.x(), dto.y(), dto.z());
+    }
+
+    /** Sensor dimensions for a calibration job: present and strictly positive. */
+    public static void requireImageSize(Integer width, Integer height, String path) {
+        requirePresent(width, path + ".width", ErrorType.MISSING_FIELD);
+        requirePresent(height, path + ".height", ErrorType.MISSING_FIELD);
+        if (width <= 0 || height <= 0) {
+            throw new GeometryValidationException(ErrorType.INVALID_IMAGE_SIZE,
+                    "Image width and height must be positive, got " + width + "x" + height,
+                    Map.of("width", width, "height", height));
+        }
+    }
+
     private static void requirePresent(Object value, String field, ErrorType type) {
         if (value == null) {
             throw new GeometryValidationException(type,

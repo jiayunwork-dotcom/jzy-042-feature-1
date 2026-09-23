@@ -15,6 +15,7 @@ public class JobMetrics {
     private final Instant startedAt = Instant.now();
     private final AtomicLong projectionJobsCompleted = new AtomicLong();
     private final AtomicLong triangulationJobsCompleted = new AtomicLong();
+    private final AtomicLong calibrationJobsCompleted = new AtomicLong();
 
     public Instant startedAt() {
         return startedAt;
@@ -28,11 +29,19 @@ public class JobMetrics {
         return triangulationJobsCompleted.get();
     }
 
+    public long calibrationJobsCompleted() {
+        return calibrationJobsCompleted.get();
+    }
+
     public void projectionJobCompleted() {
         projectionJobsCompleted.incrementAndGet();
     }
 
     public void triangulationJobCompleted() {
         triangulationJobsCompleted.incrementAndGet();
+    }
+
+    public void calibrationJobCompleted() {
+        calibrationJobsCompleted.incrementAndGet();
     }
 }

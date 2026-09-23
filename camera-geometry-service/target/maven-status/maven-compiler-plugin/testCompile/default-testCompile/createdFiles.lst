@@ -1,0 +1,11 @@
+com/acme/camera/api/ProjectionApiTest.class
+com/acme/camera/api/CalibrationConcurrencyTest.class
+com/acme/camera/api/ConcurrencyIsolationTest.class
+com/acme/camera/calibration/CameraCalibratorTest.class
+com/acme/camera/calibration/CalibrationFixtures.class
+com/acme/camera/api/CalibrationApiTest.class
+com/acme/camera/core/PinholeProjectorTest.class
+com/acme/camera/api/CalibrationConcurrencyTest$Expected.class
+com/acme/camera/core/DltTriangulatorTest.class
+com/acme/camera/api/TriangulationApiTest.class
+com/acme/camera/api/ConcurrencyIsolationTest$Outcome.class

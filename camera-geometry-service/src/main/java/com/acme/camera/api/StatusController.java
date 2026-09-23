@@ -29,7 +29,9 @@ public class StatusController {
                 VERSION,
                 metrics.startedAt(),
                 Duration.between(metrics.startedAt(), Instant.now()).toSeconds(),
-                new JobCounts(metrics.projectionJobsCompleted(), metrics.triangulationJobsCompleted()));
+                new JobCounts(metrics.projectionJobsCompleted(),
+                        metrics.triangulationJobsCompleted(),
+                        metrics.calibrationJobsCompleted()));
     }
 
     public record StatusResponse(String status,
@@ -40,6 +42,6 @@ public class StatusController {
                                  JobCounts jobsCompleted) {
     }
 
-    public record JobCounts(long projection, long triangulation) {
+    public record JobCounts(long projection, long triangulation, long calibration) {
     }
 }
